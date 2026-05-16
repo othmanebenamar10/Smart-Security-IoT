@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.main.json",
+  "include": [
+    "security/**/*.ts",
+    "database/**/*.ts",
+    "logs/**/*.ts",
+    "tests/**/*.ts",
+    "tests/**/*.d.ts"
+  ]
+}

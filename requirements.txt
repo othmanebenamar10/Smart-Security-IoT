@@ -1,0 +1,9 @@
+flask
+flask-cors
+python-dotenv
+opencv-python
+numpy
+# face_recognition depends on dlib and is optional; enable if you can build dlib
+face_recognition
+werkzeug
+requests

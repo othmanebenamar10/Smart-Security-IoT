@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Test Caméra</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:20px}
+    .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    video{background:#000;border-radius:8px;max-width:100%;height:auto}
+    .overlay{margin-top:8px}
+    button{padding:8px 12px;border-radius:6px;border:1px solid #ccc;background:#f6f6f6}
+  </style>
+</head>
+<body>
+  <h1>Test Caméra (PC)</h1>
+
+  <div class="controls">
+    <label for="deviceSelect">Caméra:</label>
+    <select id="deviceSelect"></select>
+    <button id="startBtn">Démarrer</button>
+    <button id="stopBtn" disabled>Arrêter</button>
+    <button id="snapBtn" disabled>Capture</button>
+    <span id="fps" style="margin-left:12px;font-family:monospace"></span>
+  </div>
+
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="canvas" style="display:none"></canvas>
+  <div class="overlay" id="status"></div>
+
+  <script>
+    const deviceSelect = document.getElementById('deviceSelect');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const snapBtn = document.getElementById('snapBtn');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const status = document.getElementById('status');
+    const fpsEl = document.getElementById('fps');
+
+    let stream = null;
+    let animationId = null;
+    let frameCount = 0;
+    let lastTime = performance.now();
+
+    async function enumerateDevices(){
+      try{
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter(d => d.kind === 'videoinput');
+        deviceSelect.innerHTML = '';
+        cams.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.deviceId;
+          opt.textContent = c.label || ('Caméra ' + c.deviceId.slice(0,6));
+          deviceSelect.appendChild(opt);
+        });
+      }catch(e){
+        status.textContent = 'Erreur enumeration devices: ' + e.message;
+      }
+    }
+
+    async function start(deviceId){
+      try{
+        stop();
+        const constraints = { video: deviceId ? { deviceId: { exact: deviceId } } : true, audio: false };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        await video.play();
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        snapBtn.disabled = false;
+        status.textContent = '';
+        frameCount = 0; lastTime = performance.now();
+        tick();
+      }catch(e){
+        status.textContent = 'Erreur accès caméra: ' + (e.message || e);
+      }
+    }
+
+    function stop(){
+      if(stream){
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      if(animationId) cancelAnimationFrame(animationId);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      snapBtn.disabled = true;
+      fpsEl.textContent = '';
+    }
+
+    function tick(){
+      frameCount++;
+      const now = performance.now();
+      if(now - lastTime >= 1000){
+        fpsEl.textContent = 'FPS: ' + frameCount;
+        frameCount = 0;
+        lastTime = now;
+      }
+      animationId = requestAnimationFrame(tick);
+    }
+
+    snapBtn.addEventListener('click', () => {
+      if(!video.videoWidth) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      const data = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = data;
+      a.download = 'capture-' + Date.now() + '.png';
+      a.click();
+    });
+
+    startBtn.addEventListener('click', () => start(deviceSelect.value || undefined));
+    stopBtn.addEventListener('click', stop);
+
+    deviceSelect.addEventListener('change', () => {
+      if(stream) start(deviceSelect.value);
+    });
+
+    // init
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      status.textContent = 'getUserMedia non supporté dans ce navigateur.';
+      startBtn.disabled = true;
+    } else {
+      enumerateDevices();
+      navigator.mediaDevices.addEventListener('devicechange', enumerateDevices);
+    }
+  </script>
+</body>
+</html>

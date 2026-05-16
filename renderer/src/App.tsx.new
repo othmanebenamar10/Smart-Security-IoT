@@ -1,0 +1,94 @@
+/**
+ * Main Application Component
+ * @author BENAMAR Othmane
+ * @secure Error handling and connection validation
+ */
+import { useEffect, useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import Dashboard from './components/Dashboard';
+
+const App = () => {
+  const [connected, setConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
+  const checkConnection = useCallback(async () => {
+    try {
+      setError(null);
+      setRetrying(true);
+      
+      // Add timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        throw new Error('Délai d\'attente dépassé');
+      }, 5000);
+      
+      await (window as any).secureAPI.send('secure:ping');
+      clearTimeout(timeout);
+      
+      setConnected(true);
+      setRetrying(false);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Connexion échouée';
+      setError(errorMessage);
+      setConnected(false);
+      setRetrying(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkConnection();
+    const interval = setInterval(checkConnection, 30000); // Heartbeat every 30s
+    return () => clearInterval(interval);
+  }, [checkConnection]);
+
+  return (
+    <div className="min-h-screen bg-cyber text-white">
+      <div className="max-w-screen-2xl mx-auto px-6 py-4">
+        {/* Error Banner */}
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 rounded-lg bg-rose-900/30 border border-rose-600 px-4 py-3 text-rose-200"
+          >
+            <p className="text-sm">⚠️ {error}</p>
+          </motion.div>
+        )}
+
+        <motion.header initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+          <div className="flex items-center justify-between border-b border-slate-700 pb-4 mb-6">
+            <div>
+              <h1 className="text-3xl font-semibold">Smart Secure Access IoT System</h1>
+              <p className="text-slate-300 mt-1">Dashboard SOC sécurisé pour contrôle d'accès industriel.</p>
+              <p className="text-xs text-slate-500 mt-2">© 2024 BENAMAR Othmane</p>
+            </div>
+            <div className="rounded-full bg-slate-800 px-4 py-2 text-sm text-slate-200">
+              <span className="inline-block mr-2">{retrying ? '⏳' : connected ? '✓' : '✗'}</span>
+              Statut système :{' '}
+              <span className={connected ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                {connected ? 'En ligne' : 'Déconnecté'}
+              </span>
+            </div>
+          </div>
+        </motion.header>
+
+        {connected ? (
+          <Dashboard />
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center justify-center min-h-[60vh]"
+          >
+            <div className="text-center">
+              <h2 className="text-2xl font-semibold mb-4">Connexion au système en cours...</h2>
+              <p className="text-slate-400">Veuillez patienter pendant que nous établissons la connexion.</p>
+            </div>
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default App;

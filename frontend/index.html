@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Smart Security IoT</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.0.7/dist/blazeface.min.js"></script>
+  <style>
+    body { background: #0b1221; color: #e6eef8; }
+    .accent { background: linear-gradient(90deg,#071029,#0e2a46); }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="flex">
+    <aside class="w-64 p-4 accent text-gray-200 h-screen">
+      <h1 class="text-xl font-bold">Smart Security IoT</h1>
+      <p class="text-sm text-gray-400 mt-2">Caméra: Caméra Jardin</p>
+      <nav class="mt-6">
+        <ul>
+          <li class="py-2"><a href="#" class="text-gray-200">Dashboard</a></li>
+          <li class="py-2"><a href="#history" class="text-gray-200">Historique</a></li>
+          <li class="py-2"><a href="#faces" class="text-gray-200">Visages connus</a></li>
+          <li class="py-2"><a href="#settings" class="text-gray-200">Paramètres</a></li>
+        </ul>
+      </nav>
+    </aside>
+    <main class="flex-1 p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-2xl font-semibold">Dashboard</h2>
+          <p class="text-sm text-gray-400">Vue temps réel</p>
+        </div>
+        <div class="flex items-center gap-4">
+          <div id="status" class="text-sm text-green-400">En ligne</div>
+          <button id="recBtn" class="bg-red-600 rounded-full w-10 h-10"></button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4">
+        <div class="col-span-2 bg-[#071227] p-4 rounded">
+          <div class="flex justify-between items-center mb-2">
+            <div class="text-sm text-gray-300">Caméra Jardin</div>
+            <div class="text-xs text-gray-400" id="timestamp">--:--:--</div>
+          </div>
+          <div class="bg-black rounded overflow-hidden relative">
+            <video id="cameraStreamVideo" class="w-full h-96 object-cover bg-black" playsinline autoplay muted></video>
+            <canvas id="cameraOverlay" class="absolute top-0 left-0 w-full h-96 pointer-events-none"></canvas>
+            <img id="cameraSnapshotFallback" src="" alt="stream fallback" class="w-full h-96 object-cover hidden" onerror="this.onerror=null;this.src='/assets/placeholder.png'" />
+          </div>
+        </div>
+
+        <div class="bg-[#071227] p-4 rounded">
+          <h3 class="font-medium mb-2">Stats</h3>
+          <ul id="statsList" class="text-sm text-gray-300 space-y-2">
+            <li>Visages connus: <span id="knownCount">-</span></li>
+            <li>Visages inconnus: <span id="unknownCount">-</span></li>
+            <li>Alerte aujourd'hui: <span id="alertsToday">-</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <section id="history" class="mt-6">
+        <h3 class="text-lg mb-2">Historique</h3>
+        <div id="historyList" class="space-y-3 text-sm text-gray-300"></div>
+      </section>
+
+      <section id="faces" class="mt-6">
+        <h3 class="text-lg mb-2">Visages connus</h3>
+
+        <!-- Simplified enrollment UI: preview, capture, or file upload -->
+        <div class="mb-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-[#071227] p-3 rounded">
+            <div class="text-sm text-gray-300 mb-2">A. Capturer depuis la webcam</div>
+            <video id="preview" class="w-full h-48 bg-black rounded object-cover" playsinline autoplay muted></video>
+            <div class="flex gap-2 mt-2">
+              <input id="enrollNameCam" type="text" placeholder="Nom" class="p-2 rounded bg-[#071227] flex-1" />
+              <button id="captureBtn" class="px-3 py-2 bg-green-600 rounded">Capturer & Ajouter</button>
+            </div>
+            <div id="camStatus" class="text-xs text-gray-400 mt-2"></div>
+          </div>
+
+          <div class="bg-[#071227] p-3 rounded">
+            <div class="text-sm text-gray-300 mb-2">B. Importer un fichier</div>
+            <input type="file" id="faceImage" accept="image/*" class="p-2 rounded bg-[#071227] w-full" />
+            <div class="flex gap-2 mt-2">
+              <input id="enrollNameFile" type="text" placeholder="Nom" class="p-2 rounded bg-[#071227] flex-1" />
+              <button id="uploadBtn" class="px-3 py-2 bg-blue-600 rounded">Importer</button>
+            </div>
+            <div class="text-xs text-gray-400 mt-2">L'import reste disponible, et la webcam du PC est conservee pour tester le flux en direct.</div>
+            <div id="fileStatus" class="text-xs text-gray-400 mt-2"></div>
+          </div>
+        </div>
+
+        <div id="facesList" class="grid grid-cols-3 gap-3 text-sm text-gray-300"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    const API_BASE = 'http://127.0.0.1:5000';
+
+    async function refresh() {
+      try {
+        const ts = new Date().toLocaleTimeString();
+        document.getElementById('timestamp').innerText = ts;
+
+        const res = await fetch(API_BASE + '/api/stats');
+        if (res.ok) {
+          const j = await res.json();
+          document.getElementById('knownCount').innerText = j.known_faces;
+          document.getElementById('alertsToday').innerText = j.alerts_today;
+        }
+
+        const h = await fetch(API_BASE + '/api/history');
+        if (h.ok) {
+          const events = await h.json();
+          const container = document.getElementById('historyList');
+          container.innerHTML = '';
+          events.slice(0,10).forEach(e => {
+            const div = document.createElement('div');
+            div.className = 'p-2 bg-[#091526] rounded flex items-center gap-3';
+            const thumb = document.createElement('img');
+            thumb.src = e.image_path ? (API_BASE + e.image_path) : '/assets/placeholder.png';
+            thumb.className = 'w-20 h-12 object-cover rounded';
+            const meta = document.createElement('div');
+            meta.innerHTML = `<div class="text-sm">${e.type.toUpperCase()} ${e.name||''}</div><div class="text-xs text-gray-400">${e.timestamp}</div>`;
+            div.appendChild(thumb);
+            div.appendChild(meta);
+            container.appendChild(div);
+          });
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setInterval(refresh, 3000);
+    refresh();
+
+    async function loadFaces() {
+      try {
+        const res = await fetch(API_BASE + '/api/known_faces');
+        if (!res.ok) return;
+        const list = await res.json();
+        const container = document.getElementById('facesList');
+        container.innerHTML = '';
+        list.forEach(f => {
+          const c = document.createElement('div');
+          c.className = 'p-2 bg-[#091526] rounded';
+          const img = document.createElement('img');
+          img.src = f.image_path ? (API_BASE + f.image_path) : '/assets/placeholder.png';
+          img.className = 'w-full h-28 object-cover rounded mb-2';
+          const nm = document.createElement('div');
+          nm.innerText = f.name;
+          nm.className = 'font-medium';
+          const btn = document.createElement('button');
+          btn.innerText = 'Supprimer';
+          btn.className = 'mt-2 text-xs text-red-400';
+          btn.onclick = async () => {
+            if (!confirm('Supprimer ce visage ?')) return;
+            const r = await fetch(API_BASE + '/api/known_faces/' + f.id, { method: 'DELETE' });
+            if (r.ok) loadFaces();
+          };
+          c.appendChild(img);
+          c.appendChild(nm);
+          c.appendChild(btn);
+          container.appendChild(c);
+        });
+      } catch (e) { console.error(e); }
+    }
+
+    // --- Enrollment handlers (webcam capture + file upload) ---
+    const preview = document.getElementById('preview');
+    const captureBtn = document.getElementById('captureBtn');
+    const enrollNameCam = document.getElementById('enrollNameCam');
+    const camStatus = document.getElementById('camStatus');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const enrollNameFile = document.getElementById('enrollNameFile');
+    const faceImageInput = document.getElementById('faceImage');
+    const fileStatus = document.getElementById('fileStatus');
+
+    async function startPreview() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        camStatus.innerText = 'Webcam non supportée';
+        return;
+      }
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        preview.srcObject = s;
+        camStatus.innerText = '';
+      } catch (e) {
+        camStatus.innerText = 'Accès caméra refusé ou indisponible';
+      }
+    }
+
+    captureBtn.addEventListener('click', async () => {
+      const name = (enrollNameCam.value || '').trim();
+      if (!name) { camStatus.innerText = 'Entrez un nom'; return; }
+      if (!preview || !preview.videoWidth) { camStatus.innerText = 'Aucun flux vidéo'; return; }
+      camStatus.innerText = 'Préparation de la capture...';
+      const canvas = document.createElement('canvas');
+      canvas.width = preview.videoWidth;
+      canvas.height = preview.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(preview, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(async (blob) => {
+        if (!blob) { camStatus.innerText = 'Erreur capture'; return; }
+        const fd = new FormData();
+        fd.append('name', name);
+        fd.append('image', blob, `${name.replace(/\s+/g, '_')}.png`);
+        try {
+          const res = await fetch(API_BASE + '/api/known_faces', { method: 'POST', body: fd });
+          if (res.ok) {
+            camStatus.innerText = 'Ajouté avec succès';
+            enrollNameCam.value = '';
+            loadFaces();
+          } else {
+            camStatus.innerText = 'Erreur lors de l\'ajout (serveur)';
+          }
+        } catch (err) {
+          camStatus.innerText = 'Erreur réseau lors de l\'ajout';
+        }
+      }, 'image/png');
+    });
+
+    uploadBtn.addEventListener('click', async () => {
+      const name = (enrollNameFile.value || '').trim();
+      const file = faceImageInput.files[0];
+      if (!name || !file) { fileStatus.innerText = 'Nom et fichier requis'; return; }
+      fileStatus.innerText = 'Envoi en cours...';
+      const fd = new FormData();
+      fd.append('name', name);
+      fd.append('image', file);
+      try {
+        const res = await fetch(API_BASE + '/api/known_faces', { method: 'POST', body: fd });
+        if (res.ok) {
+          fileStatus.innerText = 'Importé avec succès';
+          enrollNameFile.value = '';
+          faceImageInput.value = '';
+          loadFaces();
+        } else {
+          fileStatus.innerText = 'Erreur serveur lors de l\'import';
+        }
+      } catch (e) {
+        fileStatus.innerText = 'Erreur réseau lors de l\'import';
+      }
+    });
+
+    // Start preview automatically (faces enrollment small preview)
+    startPreview();
+
+    // Start main dashboard stream (uses PC webcam if available, otherwise falls back to latest snapshot)
+    async function startMainStream() {
+      const vid = document.getElementById('cameraStreamVideo');
+      const fallback = document.getElementById('cameraSnapshotFallback');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        // show fallback image
+        vid.classList.add('hidden');
+        fallback.classList.remove('hidden');
+        fallback.src = API_BASE + '/api/latest_snapshot?ts=' + Date.now();
+        setInterval(() => { fallback.src = API_BASE + '/api/latest_snapshot?ts=' + Date.now(); }, 3000);
+        return;
+      }
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        vid.srcObject = s;
+        vid.classList.remove('hidden');
+        fallback.classList.add('hidden');
+      } catch (e) {
+        vid.classList.add('hidden');
+        fallback.classList.remove('hidden');
+        fallback.src = API_BASE + '/api/latest_snapshot?ts=' + Date.now();
+        setInterval(() => { fallback.src = API_BASE + '/api/latest_snapshot?ts=' + Date.now(); }, 3000);
+      }
+    }
+
+    // start main stream and initial load
+    startMainStream();
+    loadFaces();
+  </script>
+</body>
+</html>
